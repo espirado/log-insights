@@ -1,3 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Results and artifacts
+results/
+logs/
+*.html
+*.pdf
+*.png
+
+# Environment
+.env
+.env.local
+
+# OS/Editor
+.DS_Store
+.idea/
+.vscode/
 ### General ###
 # Byte-compiled / compiled files
 *.py[cod]

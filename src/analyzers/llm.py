@@ -6,7 +6,7 @@ from datetime import datetime
 from .base import BaseAnalyzer
 
 class ContextAwareLLMAnalyzer(BaseAnalyzer):
-    def __init__(self, api_key: str, model: str = "gpt-3.5-turbo"):
+    def __init__(self, api_key: str, model: str = "gpt-4o-mini"):
         super().__init__()
         self.client = openai.OpenAI(api_key=api_key)
         self.model = model
@@ -84,7 +84,6 @@ class ContextAwareLLMAnalyzer(BaseAnalyzer):
                     },
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.3,
                 response_format={"type": "json_object"}
             )
             
@@ -145,12 +144,36 @@ class ContextAwareLLMAnalyzer(BaseAnalyzer):
             for field in required_fields:
                 if field not in analysis:
                     analysis[field] = None
+
+            # Add confidence score estimation
+            analysis["confidence_score"] = self._estimate_confidence(analysis)
             
             return analysis
             
         except json.JSONDecodeError:
             print("Failed to parse LLM response")
             return self._get_error_analysis()
+
+    def _estimate_confidence(self, analysis: Dict[str, Any]) -> float:
+        """Heuristic confidence estimate based on field completeness and specificity."""
+        score = 1.0
+        # Penalize missing core fields
+        for key in ['category', 'severity', 'root_cause', 'remediation']:
+            if not analysis.get(key):
+                score *= 0.8
+        # Root cause length
+        rc = analysis.get('root_cause') or ''
+        if len(rc) < 40:
+            score *= 0.9
+        # Remediation length
+        rem = analysis.get('remediation') or ''
+        if len(rem) < 40:
+            score *= 0.9
+        # Context agreement
+        ctx = (analysis.get('context') or '').lower()
+        if ctx not in ['kubernetes', 'database', 'infrastructure', 'application', 'security']:
+            score *= 0.9
+        return max(0.05, round(score, 3))
 
     def _get_error_analysis(self) -> Dict[str, Any]:
         """

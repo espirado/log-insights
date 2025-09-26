@@ -1,77 +1,73 @@
 # Log Insight - AI-Powered Log Analysis
 
-An intelligent log analysis tool that uses LLMs to provide deep insights into system logs.
+An intelligent log analysis tool using LLMs for context-aware insights, benchmarking, and publication-ready statistical evaluation.
 
-## Features
+## Quick Start
 
-- AI-powered log analysis using OpenAI's GPT models
-- Identification of issues, patterns, and anomalies
-- Root cause analysis and remediation suggestions
-- Real-time visualization of log patterns
-- Support for various log formats
-
-## Installation
-
-1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/log-insight.git
-cd log-insight
-```
-
-2. Create a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
-```bash
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env  # set secrets
 ```
 
-4. Copy `.env.example` to `.env` and add your OpenAI API key:
+## Core Workflows
+
+Analyze a file and create a dashboard:
+
 ```bash
-cp .env.example .env
-# Edit .env and add: OPENAI_API_KEY=your_key_here
+python -m src.cli analyze logs/app.log --chunk-size 10 --format html --output $(echo ${RESULTS_ROOT:-results})/reports/analysis_results.html
 ```
 
-## Usage
+Run a benchmarking comparison and append stats to the manuscript:
 
-Basic usage:
-```python
-from src.analyzers.llm import LLMAnalyzer
-from src.data.log_parser import LogParser
-
-# Initialize components
-parser = LogParser(chunk_size=10)
-analyzer = LLMAnalyzer(api_key="your-api-key")
-
-# Analyze logs
-for log_chunk in parser.parse_file("path/to/logs.txt"):
-    analysis = analyzer.analyze_chunk(log_chunk)
-    print(analysis)
+```bash
+python -m src.cli benchmark path/to/logs.txt path/to/ground_truth.json \
+  --out-prefix $(echo ${RESULTS_ROOT:-results})/benchmarks/bench \
+  --model o3-mini --manuscript docs/results/manuscript.md
 ```
 
-## Project Structure
+Provision EC2, stream CloudWatch logs, analyze, and save a live-updated dashboard:
 
-```
-log-insight/
-├── src/
-│   ├── analyzers/      # Log analysis implementations
-│   ├── visualization/  # Data visualization
-│   ├── data/          # Log parsing and data handling
-│   └── utils/         # Helper utilities
-└── tests/             # Test cases
+```bash
+python -m src.cli experiment --region us-east-1 --key-name YOUR_KEYPAIR \
+  --duration 300 --chunk-size 5 --out-root $(echo ${RESULTS_ROOT:-results})/experiments
 ```
 
-## Contributing
+Publish figures and stats to the manuscript:
 
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+```bash
+python -m src.cli publish results/experiments/run_YYYYMMDD_HHMMSS --manuscript docs/results/manuscript.md
+python -m src.cli publish_stats --results publication_ready_results.json --manuscript docs/results/manuscript.md
+```
 
-## License
+One-click statistical analysis (synthetic, for paper numbers):
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+```bash
+python quick_statistical_analysis.py
+```
+
+## Repository Structure
+
+See `docs/REPO_STRUCTURE.md` for details. Generated artifacts go under `results/` (configurable via `RESULTS_ROOT`).
+
+## Environment Variables
+
+- `OPENAI_API_KEY` (required for LLM)
+- `ELASTIC_API_KEY`, `SPLUNK_USERNAME`, `SPLUNK_PASSWORD` (optional connectors)
+- `RESULTS_ROOT` (default: `results`)
+- `AWS_REGION` (default: `us-east-1`)
+
+## Makefile Shortcuts
+
+```bash
+make install
+make experiment KEY_NAME=your-keypair AWS_REGION=us-east-1
+make benchmark LOG_FILE=path/to/logs.txt GROUND_TRUTH=path/to/gt.json
+make publish EXP_DIR=results/experiments/run_YYYYMMDD_HHMMSS
+make publish-stats
+```
+
+## Notes
+
+- All outputs are parameterized to land under `results/*`.
+- Manuscript lives at `docs/results/manuscript.md`. Figures and stats can be appended via CLI.
