@@ -46,7 +46,10 @@ logs/
 *.bak
 
 # Documentation and reports
-docs/results/
+# Keep most generated results ignored, but allow the manuscript to be tracked.
+docs/results/*
+!docs/results/manuscript.md
+!docs/results/.gitkeep
 *.pdf
 *.docx
 
