@@ -19,3 +19,7 @@ class ElasticsearchClient:
         return self.search_logs(index=index, query=q, size=size)
 
 
+
+
+
+

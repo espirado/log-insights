@@ -10,6 +10,8 @@ from datetime import datetime
 
 from src.data.ec2_stream import CloudWatchEC2Stream
 from src.analyzers.llm import ContextAwareLLMAnalyzer
+from src.analyzers.ollama_analyzer import OllamaAnalyzer
+from src.data.log_filters import apply_filters, drop_health_checks, drop_noise_levels, redact_secrets
 from src.visualization.charts import ChartGenerator
 
 
@@ -50,14 +52,21 @@ def terraform_destroy(terraform_dir: str, variables: Dict[str, Any]) -> None:
 def stream_and_analyze(
     log_group: str,
     region: Optional[str],
-    api_key: str,
+    api_key: Optional[str],
     duration_seconds: int,
     chunk_size: int,
     output_dir: str,
-    dashboard_filename: str = "stream_dashboard.html"
+    dashboard_filename: str = "stream_dashboard.html",
+    provider: str = "openai",
+    model: str = "gpt-4o-mini",
+    ollama_host: str = "http://localhost:11434",
+    enable_filters: bool = True
 ) -> Dict[str, Any]:
     os.makedirs(output_dir, exist_ok=True)
-    analyzer = ContextAwareLLMAnalyzer(api_key=api_key)
+    if provider == 'openai':
+        analyzer = ContextAwareLLMAnalyzer(api_key=api_key or "", model=model)
+    else:
+        analyzer = OllamaAnalyzer(model=model, host=ollama_host)
     streamer = CloudWatchEC2Stream(log_group=log_group, region=region)
     generator = ChartGenerator()
 
@@ -66,9 +75,13 @@ def stream_and_analyze(
     last_write = 0.0
 
     for line in streamer.poll():
-        buffer.append(line)
+        line_in = line
+        buffer.append(line_in)
         if len(buffer) >= chunk_size:
-            analyzer.analyze_chunk(buffer)
+            chunk = buffer
+            if enable_filters:
+                chunk = apply_filters(chunk, [redact_secrets, drop_health_checks, drop_noise_levels])
+            analyzer.analyze_chunk(chunk)
             buffer = []
 
         now = time.monotonic()
@@ -137,7 +150,11 @@ def run_experiment(
     out_root: str = None,
     destroy_after: bool = True,
     elk_params: Optional[Dict[str, Any]] = None,
-    splunk_params: Optional[Dict[str, Any]] = None
+    splunk_params: Optional[Dict[str, Any]] = None,
+    provider: str = "openai",
+    model: str = "gpt-4o-mini",
+    ollama_host: str = "http://localhost:11434",
+    enable_filters: bool = True
 ) -> str:
     if out_root is None:
         out_root = os.getenv('RESULTS_ROOT', 'results') + '/experiments'
@@ -169,7 +186,11 @@ def run_experiment(
             api_key=api_key,
             duration_seconds=duration_seconds,
             chunk_size=chunk_size,
-            output_dir=out_dir
+            output_dir=out_dir,
+            provider=provider,
+            model=model,
+            ollama_host=ollama_host,
+            enable_filters=enable_filters
         )
 
         # Optional ELK/Splunk comparisons

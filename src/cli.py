@@ -3,6 +3,7 @@ import click
 import os
 from dotenv import load_dotenv
 from src.analyzers.llm import ContextAwareLLMAnalyzer
+from src.analyzers.ollama_analyzer import OllamaAnalyzer
 from src.data.log_parser import LogParser
 from src.visualization.charts import ChartGenerator
 import json
@@ -30,17 +31,23 @@ def cli():
 @click.option('--chunk-size', default=10, help='Number of logs to process at once')
 @click.option('--output', '-o', default='analysis_results.html', help='Output file for visualization')
 @click.option('--format', '-f', type=click.Choice(['html', 'json']), default='html', help='Output format')
+@click.option('--provider', type=click.Choice(['openai', 'ollama']), default='openai')
 @click.option('--api-key', envvar='OPENAI_API_KEY', help='OpenAI API key')
-def analyze(log_file, chunk_size, output, format, api_key):
+@click.option('--ollama-host', default='http://localhost:11434')
+@click.option('--model', default='gpt-4o-mini', help='Model name')
+def analyze(log_file, chunk_size, output, format, provider, api_key, ollama_host, model):
     """Analyze log file and generate insights"""
-    if not api_key:
-        raise click.UsageError("OpenAI API key is required. Set OPENAI_API_KEY environment variable or use --api-key")
+    if provider == 'openai' and not api_key:
+        raise click.UsageError("OpenAI API key is required for provider=openai. Set OPENAI_API_KEY or use --api-key")
     
     click.echo(f"Analyzing log file: {log_file}")
     
     # Initialize components
     parser = LogParser(chunk_size=chunk_size)
-    analyzer = ContextAwareLLMAnalyzer(api_key=api_key)
+    if provider == 'openai':
+        analyzer = ContextAwareLLMAnalyzer(api_key=api_key, model=model)
+    else:
+        analyzer = OllamaAnalyzer(model=model, host=ollama_host)
     
     # Process logs
     with click.progressbar(length=os.path.getsize(log_file),
@@ -114,18 +121,19 @@ def _load_logs_file(path: str) -> List[str]:
 @cli.command()
 @click.argument('log_file', type=click.Path(exists=True))
 @click.argument('ground_truth_file', type=click.Path(exists=True))
+@click.option('--provider', type=click.Choice(['openai', 'ollama']), default='openai')
 @click.option('--api-key', envvar='OPENAI_API_KEY', help='OpenAI API key (optional for LLM arm)')
-@click.option('--model', default='o3-mini', help='LLM model to use')
+@click.option('--model', default='o3-mini', help='Model to use (OpenAI or Ollama tag)')
 @click.option('--out-prefix', default=lambda: os.getenv('RESULTS_ROOT', 'results') + '/benchmarks/bench', help='Output prefix for plots/files')
 @click.option('--manuscript', default=None, help='Optional manuscript path to append stats')
-def benchmark(log_file, ground_truth_file, api_key, model, out_prefix, manuscript):
+def benchmark(log_file, ground_truth_file, provider, api_key, model, out_prefix, manuscript):
     """Run comparative benchmark: LLM vs rule-based vs TF-IDF baselines."""
     click.echo("Loading data...")
     logs = _load_logs_file(log_file)
     truth = _load_ground_truth(ground_truth_file)
 
     click.echo("Running benchmarks...")
-    results = run_comparative_benchmark(logs, truth, api_key=api_key, model=model)
+    results = run_comparative_benchmark(logs, truth, api_key=api_key, model=model, provider=provider)
 
     click.echo("Generating comparative plots...")
     figs = comparative_plots(results)
@@ -152,7 +160,7 @@ def benchmark(log_file, ground_truth_file, api_key, model, out_prefix, manuscrip
     click.echo(f"Saved: {acc_path}, {err_path}, {metrics_path}")
 
     # Enhanced statistical summary (LLM only, if api_key provided)
-    if api_key:
+    if provider == 'openai' and api_key:
         try:
             from src.analyzers.llm import ContextAwareLLMAnalyzer
             evaluator = EnhancedAnalyzerEvaluator()
@@ -291,7 +299,10 @@ def splunk_query(host, port, username, password, query, earliest, latest):
 @cli.command()
 @click.option('--region', required=True)
 @click.option('--key-name', required=True, help='EC2 key pair name')
-@click.option('--api-key', envvar='OPENAI_API_KEY', required=True)
+@click.option('--provider', type=click.Choice(['openai', 'ollama']), default='openai')
+@click.option('--api-key', envvar='OPENAI_API_KEY')
+@click.option('--model', default='gpt-4o-mini')
+@click.option('--ollama-host', default='http://localhost:11434')
 @click.option('--duration', default=300, help='Stream duration seconds')
 @click.option('--chunk-size', default=5)
 @click.option('--terraform-dir', default='infra/terraform')
@@ -311,10 +322,12 @@ def splunk_query(host, port, username, password, query, earliest, latest):
 @click.option('--splunk-query', default=None)
 @click.option('--splunk-earliest', default='-24h')
 @click.option('--splunk-latest', default='now')
-def experiment(region, key_name, api_key, duration, chunk_size, terraform_dir, out_root, destroy,
+def experiment(region, key_name, provider, api_key, model, ollama_host, duration, chunk_size, terraform_dir, out_root, destroy,
                elk_endpoint, elk_cloud_id, elk_api_key, elk_index, elk_term_field, elk_term_value, elk_query_json,
                splunk_host, splunk_port, splunk_username, splunk_password, splunk_query, splunk_earliest, splunk_latest):
     """Provision EC2 via Terraform, stream logs, analyze, and optionally pull ELK/Splunk for comparison."""
+    if provider == 'openai' and not api_key:
+        raise click.UsageError('OPENAI provider selected but no --api-key provided')
     elk_params = {
         'endpoint': elk_endpoint,
         'cloud_id': elk_cloud_id,
@@ -337,7 +350,7 @@ def experiment(region, key_name, api_key, duration, chunk_size, terraform_dir, o
         terraform_dir=terraform_dir,
         region=region,
         key_name=key_name,
-        api_key=api_key,
+        api_key=api_key or "",
         duration_seconds=duration,
         chunk_size=chunk_size,
         out_root=out_root,
@@ -351,11 +364,12 @@ def experiment(region, key_name, api_key, duration, chunk_size, terraform_dir, o
 @cli.command()
 @click.argument('log_file', type=click.Path(exists=True))
 @click.argument('ground_truth_file', type=click.Path(exists=True))
+@click.option('--provider', type=click.Choice(['openai', 'ollama']), default='openai')
 @click.option('--models', multiple=True, required=True, help='Models to benchmark (repeat flag)')
 @click.option('--manuscript', default='docs/results/manuscript.md')
 @click.option('--out-dir', default=lambda: os.getenv('RESULTS_ROOT', 'results') + '/benchmarks')
-@click.option('--api-key', envvar='OPENAI_API_KEY', required=True)
-def benchmark_sweep(log_file, ground_truth_file, models, manuscript, out_dir, api_key):
+@click.option('--api-key', envvar='OPENAI_API_KEY')
+def benchmark_sweep(log_file, ground_truth_file, provider, models, manuscript, out_dir, api_key):
     """Run benchmarks across multiple models and append a comparison table to the manuscript."""
     logs = _load_logs_file(log_file)
     truth = _load_ground_truth(ground_truth_file)
@@ -363,8 +377,10 @@ def benchmark_sweep(log_file, ground_truth_file, models, manuscript, out_dir, ap
     evaluator = EnhancedAnalyzerEvaluator()
     model_to_stats = {}
     for model in models:
-        from src.analyzers.llm import ContextAwareLLMAnalyzer
-        analyzer = ContextAwareLLMAnalyzer(api_key=api_key, model=model)
+        if provider == 'openai':
+            analyzer = ContextAwareLLMAnalyzer(api_key=api_key, model=model)
+        else:
+            analyzer = OllamaAnalyzer(model=model)
         enhanced = evaluator.comprehensive_evaluation(analyzer, logs, truth)
         stats = {
             'accuracy': float(enhanced.accuracy),

@@ -4,6 +4,7 @@ from collections import defaultdict
 import time
 
 from src.analyzers.llm import ContextAwareLLMAnalyzer
+from src.analyzers.ollama_analyzer import OllamaAnalyzer
 from src.data.log_parser import LogParser
 
 
@@ -130,7 +131,8 @@ def run_comparative_benchmark(
     test_logs: List[str],
     ground_truth: Dict[str, Dict[str, Any]],
     api_key: Optional[str] = None,
-    model: str = "o3-mini"
+    model: str = "o3-mini",
+    provider: str = "openai"
 ) -> Dict[str, Any]:
     """
     Compare ContextAwareLLMAnalyzer with rule-based and TF-IDF baselines using
@@ -142,10 +144,14 @@ def run_comparative_benchmark(
     results: Dict[str, Any] = {}
 
     # LLM analyzer
-    if api_key:
+    if provider == 'openai' and api_key:
         llm = ContextAwareLLMAnalyzer(api_key=api_key, model=model)
         llm_metrics = evaluator.evaluate_analysis(llm, test_logs, ground_truth)
         results['llm'] = llm_metrics
+    elif provider == 'ollama':
+        oll = OllamaAnalyzer(model=model)
+        oll_metrics = evaluator.evaluate_analysis(oll, test_logs, ground_truth)
+        results['ollama'] = oll_metrics
 
     # Rule-based baseline
     rule = RuleBasedAnalyzer()
@@ -197,6 +203,8 @@ def comparative_plots(results: Dict[str, Any]) -> Dict[str, Any]:
         'accuracy': fig_acc,
         'errors': fig_err
     }
+
+
 
 
 
