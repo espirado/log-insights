@@ -22,14 +22,23 @@ class LogStreamAnalyzer(FileSystemEventHandler):
         self.buffer = []
         self.buffer_size = buffer_size
         self.metrics = defaultdict(int)
+        self.metrics['issues_found'] = defaultdict(int)
 
     async def start_monitoring(self):
         observer = Observer()
-        observer.schedule(self, self.log_path, recursive=False)
+        # Watch the directory containing the log file (watchdog expects a directory)
+        watch_dir = os.path.dirname(self.log_path) or "."
+        observer.schedule(self, watch_dir, recursive=False)
         observer.start()
         print(f"Started monitoring {self.log_path}")
 
         try:
+            # Initialize timers and file pointer
+            self.metrics['start_time'] = time.time()
+            if os.path.exists(self.log_path):
+                with open(self.log_path, 'r') as f:
+                    f.seek(0, 2)
+                    self.last_position = f.tell()
             while True:
                 if len(self.buffer) >= self.buffer_size:
                     await self.process_buffer()
@@ -40,7 +49,9 @@ class LogStreamAnalyzer(FileSystemEventHandler):
         observer.join()
 
     def on_modified(self, event):
-        if event.src_path == self.log_path:
+        if event.is_directory:
+            return
+        if os.path.abspath(event.src_path) == os.path.abspath(self.log_path):
             with open(self.log_path, 'r') as f:
                 f.seek(self.last_position)
                 new_logs = [log.strip() for log in f.readlines() if log.strip()]
@@ -62,20 +73,28 @@ class LogStreamAnalyzer(FileSystemEventHandler):
         self.metrics['processed'] += len(logs_to_process)
 
     async def _handle_analysis_result(self, analysis: Dict[str, Any], logs: list, process_time: float):
-        if analysis:
-            self.metrics['issues_found'][analysis.get('category', 'Unknown')] += 1
-            
-            print(f"\nAnalysis Result ({process_time:.2f}s):")
-            print(f"Logs Processed: {len(logs)}")
-            print(f"Category: {analysis.get('category')}")
-            print(f"Severity: {analysis.get('severity')}")
-            print(f"Root Cause: {analysis.get('root_cause')}")
-            print(f"Remediation: {analysis.get('remediation')}")
-            
-            if analysis.get('severity') == 'Critical':
-                await self._handle_critical_issue(analysis)
-            
-            print("-" * 50)
+        if not analysis:
+            return
+
+        # Some responses may return a list of issues; normalize to single item for summary
+        if isinstance(analysis, dict) and 'issues' in analysis and isinstance(analysis['issues'], list) and analysis['issues']:
+            item = analysis['issues'][0]
+        else:
+            item = analysis
+
+        self.metrics['issues_found'][item.get('category', 'Unknown')] += 1
+
+        print(f"\nAnalysis Result ({process_time:.2f}s):")
+        print(f"Logs Processed: {len(logs)}")
+        print(f"Category: {item.get('category')}")
+        print(f"Severity: {item.get('severity')}")
+        print(f"Root Cause: {item.get('root_cause')}")
+        print(f"Remediation: {item.get('remediation')}")
+
+        if item.get('severity') == 'Critical':
+            await self._handle_critical_issue(item)
+
+        print("-" * 50)
 
     async def _handle_critical_issue(self, analysis: Dict[str, Any]):
         """Handle critical severity issues"""

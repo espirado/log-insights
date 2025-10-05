@@ -69,7 +69,13 @@ class OllamaAnalyzer(BaseAnalyzer):
         obj.setdefault("component", "Unknown")
         obj.setdefault("root_cause", "")
         obj.setdefault("remediation", "")
-        obj.setdefault("timestamp", datetime.now().isoformat())
+        # Normalize timestamp to ISO if invalid
+        ts = obj.get("timestamp")
+        try:
+            import dateutil.parser as _dp  # type: ignore
+            _ = _dp.parse(ts) if ts else None
+        except Exception:
+            obj["timestamp"] = datetime.now().isoformat()
         # Heuristic confidence
         obj["confidence_score"] = self._estimate_confidence(obj)
         return obj

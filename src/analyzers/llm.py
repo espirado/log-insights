@@ -146,6 +146,15 @@ class ContextAwareLLMAnalyzer(BaseAnalyzer):
                     analysis[field] = None
 
             # Add confidence score estimation
+            # Normalize timestamp to ISO if invalid
+            ts = analysis.get("timestamp")
+            try:
+                from datetime import datetime as _dt
+                import dateutil.parser as _dp  # type: ignore
+                _ = _dp.parse(ts) if ts else None
+            except Exception:
+                analysis["timestamp"] = _dt.now().isoformat()
+
             analysis["confidence_score"] = self._estimate_confidence(analysis)
             
             return analysis
